@@ -1,0 +1,303 @@
+#pragma kernel ComputeGaussianRandom
+#pragma kernel CreateHeightSpectrum
+#pragma kernel CreateDisplaceSpectrum  
+#pragma kernel FFTHorizontal
+#pragma kernel FFTHorizontalEnd
+#pragma kernel FFTVertical
+#pragma kernel FFTVerticalEnd
+#pragma kernel CalculateDisplacement
+#pragma kernel CalculateNormal
+
+#define PI 3.14159274f
+#define gravity 9.81f
+
+int resolution;
+float A;
+float4 windAndSeed;
+float currentTime;
+int ns;
+float lambda;
+float heightScale;
+float oceanWidth;
+
+uint randNum;
+
+// Textures
+RWTexture2D<float4> gaussianRandomTexture;
+RWTexture2D<float4> heightSpectrumTexture;
+RWTexture2D<float4> displaceXSpectrumTexture;
+RWTexture2D<float4> displaceZSpectrumTexture;
+RWTexture2D<float4> inputSpectrumTexture;
+RWTexture2D<float4> outputSpectrumTexture;
+RWTexture2D<float4> displacementTexture;
+RWTexture2D<float4> normalTexture;
+
+// Functions
+float2 Gaussian(float2 id);
+uint WangHash(uint seed);
+float Rand();
+float Phillips(float2 k);
+float DonelanBannerDirectionalSpreading(float2 k);
+float Dispersion(float2 k);
+float2 ComplexMultiply(float2 c1, float2 c2);
+
+[numthreads(16,16,1)]
+void ComputeGaussianRandom(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    float2 gaussian = Gaussian(id.xy);
+    gaussianRandomTexture[id.xy] = float4(gaussian, 0.0f, 1.0f);
+}
+
+[numthreads(16,16,1)]
+void CreateHeightSpectrum(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    float2 k = float2(2.0f * PI * id.x / resolution - PI, 2.0f * PI * id.y / resolution - PI);
+    float2 gaussian = gaussianRandomTexture[id.xy].xy;
+
+    float2 hTilde0 = gaussian * sqrt(abs(Phillips(k) * DonelanBannerDirectionalSpreading(k)) / 2.0f);
+    float2 hTilde0Conj = gaussian * sqrt(abs(Phillips(-k) * DonelanBannerDirectionalSpreading(-k)) / 2.0f);
+    hTilde0Conj.y *= -1.0f;
+
+    float omegat = Dispersion(k) * currentTime;
+    float c = cos(omegat);
+    float s = sin(omegat);
+    
+    float2 h1 = ComplexMultiply(hTilde0, float2(c, s));
+    float2 h2 = ComplexMultiply(hTilde0Conj, float2(c, -s));
+
+    float2 hTilde = h1 + h2;
+
+    heightSpectrumTexture[id.xy] = float4(hTilde, 0.0f, 0.0f);
+}
+
+[numthreads(16,16,1)]
+void CreateDisplaceSpectrum(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    float2 k = float2(2.0f * PI * id.x / resolution - PI, 2.0f * PI * id.y / resolution - PI);
+    k /= max(0.001f, length(k));
+    float2 hTilde = heightSpectrumTexture[id.xy].xy;
+
+    float2 kxHTilde = ComplexMultiply(float2(0, -k.x), hTilde);
+    float2 kzHTilde = ComplexMultiply(float2(0, -k.y), hTilde);
+
+    displaceXSpectrumTexture[id.xy] = float4(kxHTilde, 0.0f, 0.0f);
+    displaceZSpectrumTexture[id.xy] = float4(kzHTilde, 0.0f, 0.0f);
+}
+
+[numthreads(16,16,1)]
+void FFTHorizontal(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    int2 idxy = id.xy;
+    idxy.x = floor(id.x / (ns * 2.0f)) * ns + id.x % ns;
+    float angle = 2.0f * PI * (id.x / (ns * 2.0f));
+    float2 w = float2(cos(angle), sin(angle));
+
+    float2 x0 = inputSpectrumTexture[idxy].xy;
+    float2 x1 = inputSpectrumTexture[int2(idxy.x + resolution * 0.5f, idxy.y)].xy;
+
+    float2 output = x0 + float2(w.x * x1.x - w.y * x1.y, w.x * x1.y + w.y * x1.x);
+    outputSpectrumTexture[id.xy] = float4(output, 0, 0);
+}
+
+[numthreads(16,16,1)]
+void FFTHorizontalEnd(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    int2 idxy = id.xy;
+    idxy.x = floor(id.x / (ns * 2.0f)) * ns + id.x % ns;
+    float angle = 2.0f * PI * (id.x / (ns * 2.0f));
+    float2 w = float2(cos(angle), sin(angle));
+    w *= -1;
+
+    float2 x0 = inputSpectrumTexture[idxy].xy;
+    float2 x1 = inputSpectrumTexture[int2(idxy.x + resolution * 0.5f, idxy.y)].xy;
+
+    float2 output = x0 + float2(w.x * x1.x - w.y * x1.y, w.x * x1.y + w.y * x1.x);
+    int x = id.x - resolution * 0.5f;
+    output *= ((x + 1) % 2.0f) * 1 + (x % 2.0f) * (-1);
+    outputSpectrumTexture[id.xy] = float4(output, 0, 0);
+}
+
+[numthreads(16,16,1)]
+void FFTVertical(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    int2 idxy = id.xy;
+    idxy.y = floor(id.y / (ns * 2.0f)) * ns + id.y % ns;
+    float angle = 2.0f * PI * (id.y / (ns * 2.0f));
+    float2 w = float2(cos(angle), sin(angle));
+
+    float2 x0 = inputSpectrumTexture[idxy].xy;
+    float2 x1 = inputSpectrumTexture[int2(idxy.x, idxy.y + resolution * 0.5f)].xy;
+
+    float2 output = x0 + float2(w.x * x1.x - w.y * x1.y, w.x * x1.y + w.y * x1.x);
+    outputSpectrumTexture[id.xy] = float4(output, 0, 0);
+}
+
+[numthreads(16,16,1)]
+void FFTVerticalEnd(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    int2 idxy = id.xy;
+    idxy.y = floor(id.y / (ns * 2.0f)) * ns + id.y % ns;
+    float angle = 2.0f * PI * (id.y / (ns * 2.0f));
+    float2 w = float2(cos(angle), sin(angle));
+    w *= -1;
+
+    float2 x0 = inputSpectrumTexture[idxy].xy;
+    float2 x1 = inputSpectrumTexture[int2(idxy.x, idxy.y + resolution * 0.5f)].xy;
+
+    float2 output = x0 + float2(w.x * x1.x - w.y * x1.y, w.x * x1.y + w.y * x1.x);
+    int x = id.y - resolution * 0.5f;
+    output *= ((x + 1) % 2.0f) * 1 + (x % 2.0f) * (-1);
+    outputSpectrumTexture[id.xy] = float4(output, 0, 0);
+}
+
+[numthreads(16,16,1)]
+void CalculateDisplacement(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    float y = length(heightSpectrumTexture[id.xy].xy) / (resolution * resolution) * heightScale;
+    float x = length(displaceXSpectrumTexture[id.xy].xy) / (resolution * resolution) * lambda;
+    float z = length(displaceZSpectrumTexture[id.xy].xy) / (resolution * resolution) * lambda;
+
+    displacementTexture[id.xy] = float4(x, y, z, 0.0f);
+}
+
+[numthreads(16,16,1)]
+void CalculateNormal(uint3 id : SV_DispatchThreadID)
+{
+    // 法线计算优化
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    //计算法线
+    float unitLength = oceanWidth / (resolution - 1.0f);//两点间单位长度
+    //获取当前点，周围4个点的uv坐标
+    uint2 uvX1 = uint2((id.x - 1.0f + resolution) % resolution, id.y);
+    uint2 uvX2 = uint2((id.x + 1.0f + resolution) % resolution, id.y);
+    uint2 uvZ1 = uint2(id.x, (id.y - 1.0f + resolution) % resolution);
+    uint2 uvZ2 = uint2(id.x, (id.y + 1.0f + resolution) % resolution);
+
+    //以当前点为中心，获取周围4个点的偏移值
+    float3 x1D = displacementTexture[uvX1].xyz;//在x轴 第一个点的偏移值
+    float3 x2D = displacementTexture[uvX2].xyz;//在x轴 第二个点的偏移值
+    float3 z1D = displacementTexture[uvZ1].xyz;//在z轴 第一个点的偏移值
+    float3 z2D = displacementTexture[uvZ2].xyz;//在z轴 第二个点的偏移值
+
+    //以当前点为原点，构建周围4个点的坐标
+    float3 x1 = float3(x1D.x - unitLength, x1D.yz);//在x轴 第一个点的坐标
+    float3 x2 = float3(x2D.x + unitLength, x2D.yz);//在x轴 第二个点的坐标
+    float3 z1 = float3(z1D.xy, z1D.z - unitLength);//在z轴 第一个点的坐标
+    float3 z2 = float3(z1D.xy, z1D.z + unitLength);//在z轴 第二个点的坐标
+
+    //计算两个切向量
+    float3 tangentX = x2 - x1;
+    float3 tangentZ = z2 - z1;
+
+    //计算法线
+    float3 normal = normalize(cross(tangentZ, tangentX));
+    normalTexture[id.xy] = float4(normal, 0.0f);
+}
+
+// Utils
+// Random seed
+uint WangHash(uint seed)
+{
+    seed = (seed ^ 61) ^ (seed >> 16);
+    seed *= 9;
+    seed = seed ^ (seed >> 4);
+    seed *= 0x27d4eb2d;
+    seed = seed ^ (seed >> 15);
+    return seed;
+}
+
+// 计算均匀分布随机数[0,1)
+float Rand()
+{
+    // Xorshift算法
+    randNum ^= (randNum << 13);
+    randNum ^= (randNum >> 17);
+    randNum ^= (randNum << 5);
+    return randNum / 4294967296.0f;
+}
+
+// Compute gaussian random number
+float2 Gaussian(float2 id)
+{
+    randNum = WangHash(id.y * resolution + id.x);
+    float x1 = Rand();
+    float x2 = Rand();
+
+    x1 = max(1e-6f, x1);
+    x2 = max(1e-6f, x2);
+
+    float g1 = sqrt(-2.0f * log(x1)) * cos(2.0f * PI * x2);
+    float g2 = sqrt(-2.0f * log(x1)) * sin(2.0f * PI * x2);
+
+    return float2(g1, g2);
+}
+
+// Phillips Spectrum
+float Phillips(float2 k)
+{
+    float kLength = length(k);
+    kLength = max(0.001f, kLength);
+
+    float kLength2 = kLength * kLength;
+    float kLength4 = kLength2 * kLength2;
+
+    float windLength = length(windAndSeed.xy);
+    float l = windLength * windLength / gravity;
+    float l2 = l * l;
+
+    float damping = 0.001f;
+    float L2 = l2 * damping * damping;
+
+    return A * exp(-1.0f / (kLength2 * l2)) / kLength4 * exp(-kLength2 * L2);
+}
+
+//Donelan-Banner方向拓展
+float DonelanBannerDirectionalSpreading(float2 k)
+{
+    float betaS;
+    float omegap = 0.855f * gravity / length(windAndSeed.xy);
+    float ratio = Dispersion(k) / omegap;
+
+    if (ratio < 0.95f)
+        betaS = 2.61f * pow(ratio, 1.3f);
+    if(ratio >= 0.95f && ratio < 1.6f)
+        betaS = 2.28f * pow(ratio, -1.3f);
+    if(ratio > 1.6f)
+    {
+        float epsilon = -0.4f + 0.8393f * exp(-0.567f * log(ratio * ratio));
+        betaS = pow(10, epsilon);
+    }
+    float theta = atan2(k.y, k.x) - atan2(windAndSeed.y, windAndSeed.x);
+
+    return betaS / max(1e-7f, 2.0f * tanh(betaS * PI) * pow(cosh(betaS * theta), 2));
+}
+
+//计算弥散
+float Dispersion(float2 k)
+{
+    return sqrt(gravity * length(k));
+}
+
+//复数相乘
+float2 ComplexMultiply(float2 c1, float2 c2)
+{
+    return float2(c1.x * c2.x - c1.y * c2.y,
+    c1.x * c2.y + c1.y * c2.x);
+}
