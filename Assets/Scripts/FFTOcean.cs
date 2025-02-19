@@ -54,6 +54,10 @@ public class FFTOcean : MonoBehaviour
         groupY = Mathf.CeilToInt(textureResolution / 16f);
 
         // Create textures
+        if(gaussianRandomTexture != null && gaussianRandomTexture.IsCreated())
+        {
+            DestroyAllTextures();
+        }
         gaussianRandomTexture = CreateRenderTexture(textureResolution);
         heightSpectrumTexture = CreateRenderTexture(textureResolution);
         displaceXSpectrumTexture = CreateRenderTexture(textureResolution);
@@ -72,6 +76,9 @@ public class FFTOcean : MonoBehaviour
         kernelFFTVerticalEnd = _FFTOceanComputeShader.FindKernel("FFTVerticalEnd");
         kernelCalculateDisplacement = _FFTOceanComputeShader.FindKernel("CalculateDisplacement");
         kernelCalculateNormal = _FFTOceanComputeShader.FindKernel("CalculateNormal");
+
+        // Set shader params
+        _FFTOceanComputeShader.SetInt("resolution", textureResolution); // Must be set in Start function
 
         // Generate Gaussian Random Texture
         _FFTOceanComputeShader.SetTexture(kernelComputeGaussianRandom, "gaussianRandomTexture", gaussianRandomTexture);
@@ -92,7 +99,6 @@ public class FFTOcean : MonoBehaviour
         wind *= _WindScale;
 
         // Shader Set Params
-        _FFTOceanComputeShader.SetInt("resolution", textureResolution);
         _FFTOceanComputeShader.SetFloat("A", _A);
         _FFTOceanComputeShader.SetVector("windAndSeed", new Vector4(wind.x, wind.y, _WindAndSeed.z, _WindAndSeed.w));
         _FFTOceanComputeShader.SetFloat("currentTime", currentTime);
@@ -171,34 +177,39 @@ public class FFTOcean : MonoBehaviour
     {
         if(gaussianRandomTexture != null)
         {
-            gaussianRandomTexture.Release();
-            Destroy(gaussianRandomTexture);
-            gaussianRandomTexture = null;
-
-            heightSpectrumTexture.Release();
-            Destroy(heightSpectrumTexture);
-            heightSpectrumTexture = null;
-
-            displaceXSpectrumTexture.Release();
-            Destroy(displaceXSpectrumTexture);
-            displaceXSpectrumTexture = null;
-
-            displaceZSpectrumTexture.Release();
-            Destroy(displaceZSpectrumTexture);
-            displaceZSpectrumTexture = null;
-
-            outputSpectrumTexture.Release();
-            Destroy(outputSpectrumTexture);
-            outputSpectrumTexture = null;
-
-            displacementTexture.Release();
-            Destroy(displacementTexture);
-            displacementTexture = null;
-
-            normalTexture.Release();
-            Destroy(normalTexture);
-            normalTexture = null;
+            DestroyAllTextures();
         }
+    }
+
+    private void DestroyAllTextures()
+    {
+        gaussianRandomTexture.Release();
+        Destroy(gaussianRandomTexture);
+        gaussianRandomTexture = null;
+
+        heightSpectrumTexture.Release();
+        Destroy(heightSpectrumTexture);
+        heightSpectrumTexture = null;
+
+        displaceXSpectrumTexture.Release();
+        Destroy(displaceXSpectrumTexture);
+        displaceXSpectrumTexture = null;
+
+        displaceZSpectrumTexture.Release();
+        Destroy(displaceZSpectrumTexture);
+        displaceZSpectrumTexture = null;
+
+        outputSpectrumTexture.Release();
+        Destroy(outputSpectrumTexture);
+        outputSpectrumTexture = null;
+
+        displacementTexture.Release();
+        Destroy(displacementTexture);
+        displacementTexture = null;
+
+        normalTexture.Release();
+        Destroy(normalTexture);
+        normalTexture = null;
     }
 
     private void ComputeFFT(int kernel, ref RenderTexture inputSpectrumTexture)
