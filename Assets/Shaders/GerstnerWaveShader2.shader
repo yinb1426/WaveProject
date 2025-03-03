@@ -1,14 +1,10 @@
-Shader "Unlit/GerstnerWaveShader"
+Shader "Unlit/GerstnerWaveShader2"
 {
     Properties
     {
-        [Header(Waves)]
-        _WaveA ("WaveA (Direction(dx, dy), Steepness, WaveLength)", Vector) = (1.0, 1.0, 0.7, 10.0)
-        _WaveB ("WaveB", Vector) = (1.0, 1.0, 0.7, 10.0)
-        _WaveC ("WaveC", Vector) = (1.0, 1.0, 0.7, 10.0)
-
         [Header(Water)]
         _WaterColor ("Water Color", Color) = (1, 1, 1, 1)
+        _DisplacementMap ("Displacement Map", 2D) = "white" {}
 
         [Header(Tessellation)]
         _TessellationFactor ("Tessellation Factor", Range(1, 64)) = 4
@@ -32,8 +28,6 @@ Shader "Unlit/GerstnerWaveShader"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            #define PI 3.14159265359
-
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -50,61 +44,29 @@ Shader "Unlit/GerstnerWaveShader"
             };
 
             CBUFFER_START(UnityPerMaterial)
-                float4 _WaveA;
-                float4 _WaveB;
-                float4 _WaveC;
+                float4 _DisplacementMap_ST;
+                float4 _NormalMap_ST;
+                float4 _BubblesTexture_ST;
                 float4 _WaterColor;
                 float _TessellationFactor;
             CBUFFER_END
 
-            void GetGerstnerWave(float4 wave, float2 positionXZ, inout float3 position, inout float3 binormal, inout float3 tangent)
-            {
-                float k = 2 * PI / wave.w;
-                float w = sqrt(9.81 * k);       // Phase Speed
-                float a = wave.z / k;           // Amplitude
-                float2 d = normalize(wave.xy);  // Direction
-                float2 p = positionXZ;          // Position(xz)
-                float value = k * dot(d, p) - w * _Time.y;
-
-                // Position
-                position.x += d.x * a * cos(value);
-                position.z += d.y * a * cos(value);
-                position.y += a * sin(value);
-
-                // Binormal
-                binormal.x += -d.x * d.y * a * k * sin(value);
-                binormal.y += d.y * a * k * cos(value);
-                binormal.z += -d.y * d.y * a * k * sin(value);
-
-                // Tangent
-                tangent.x += -d.x * d.x * a * k * sin(value);
-                tangent.y += d.x * a * k * cos(value);
-                tangent.z += -d.x * d.y * a * k * sin(value);
-            }
+            sampler2D _DisplacementMap;
+            sampler2D _NormalMap;
+            TEXTURE2D(_BubblesTexture);     SAMPLER(sampler_BubblesTexture);
 
             Varyings vert (Attributes input)
             {
                 Varyings output = (Varyings)0;
                 output.positionOS = input.positionOS;
-                output.uv = input.uv;
+                output.uv = TRANSFORM_TEX(input.uv, _DisplacementMap);
 
-                float3 positionOS = (float3)0;
-                float3 binormalOS = (float3)0;
-                float3 tangentOS = (float3)0;
+                float3 displacement = tex2Dlod(_DisplacementMap, float4(output.uv, 0, 0));
+                input.positionOS.x += displacement.x;
+                input.positionOS.y = displacement.y;
+                input.positionOS.z += displacement.z;
 
-                GetGerstnerWave(_WaveA, input.positionOS.xz, positionOS, binormalOS, tangentOS);
-                GetGerstnerWave(_WaveB, input.positionOS.xz, positionOS, binormalOS, tangentOS);
-                GetGerstnerWave(_WaveC, input.positionOS.xz, positionOS, binormalOS, tangentOS);
-
-                // Position
-                input.positionOS.x += positionOS.x;
-                input.positionOS.y = positionOS.y;
-                input.positionOS.z += positionOS.z;
-
-                // Normal
-                binormalOS = float3(binormalOS.x, binormalOS.y, 1.0 + binormalOS.z);
-                tangentOS = float3(1.0 + tangentOS.x, tangentOS.y, tangentOS.z);
-                float3 normalOS = normalize(cross(binormalOS, tangentOS));
+                float3 normalOS = tex2Dlod(_NormalMap, float4(output.uv, 0, 0));
 
                 output.positionCS = TransformObjectToHClip(input.positionOS);
                 output.positionWS = TransformObjectToWorld(input.positionOS);
@@ -151,6 +113,9 @@ Shader "Unlit/GerstnerWaveShader"
 
             float4 frag (Varyings input) : SV_Target
             {
+                float3 normalOS = tex2Dlod(_NormalMap, float4(input.uv, 0, 0));
+                float3 normalWS = TransformObjectToWorldNormal(normalOS);
+
                 // Blinn-Phong Model
                 Light mainLight = GetMainLight();
                 float3 lightColor = mainLight.color;
@@ -158,13 +123,13 @@ Shader "Unlit/GerstnerWaveShader"
                 float3 viewDirWS = normalize(_WorldSpaceCameraPos.xyz - input.positionWS);
 
                 // Ambient - half-lambert
-                float NdotL = max(dot(lightDirWS, input.normalWS), 0.0);
+                float NdotL = max(dot(lightDirWS, normalWS), 0.0);
                 float halfLambert = NdotL; // * 0.5 + 0.5;
 
                 float3 finalColor = _WaterColor.rgb * lightColor * halfLambert;
 
                 float3 halfwayDirWS = normalize(lightDirWS + viewDirWS);
-                float NdotH = saturate(dot(input.normalWS, halfwayDirWS));
+                float NdotH = saturate(dot(normalWS, halfwayDirWS));
                 float3 specularColor = float3(1.0, 1.0, 1.0) * lightColor * pow(NdotH, 64);
                 finalColor += specularColor;
 

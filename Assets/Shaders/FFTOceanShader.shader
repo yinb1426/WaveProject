@@ -9,6 +9,15 @@ Shader "Unlit/FFTOceanShader"
         [Header(Water)]
         _WaterColor ("Water Color", Color) = (1, 1, 1, 1)
 
+        [Header(SSS Color)]
+        _SSSDistortion ("SSS Distortion", Float) = 0.5
+        _SSSColor ("SSS Color", Color) = (1, 1, 1, 1)
+        _SSSPower ("SSS Power", Float) = 1.0
+        _SSSScale ("SSS Scale", Float) = 1.0
+        _BubblesTexture ("Bubbles Texture", 2D) = "white" {}
+        _ThicknessScale ("Thickness Threshold", Float) = 2.0
+        _WaveMaxHeight ("Wave Max Height", Float) = 5.0
+
         [Header(Tessellation)]
         _TessellationFactor ("Tessellation Factor", Range(1, 64)) = 4
     }
@@ -48,13 +57,22 @@ Shader "Unlit/FFTOceanShader"
             CBUFFER_START(UnityPerMaterial)
                 float4 _DisplacementMap_ST;
                 float4 _NormalMap_ST;
+                float4 _BubblesTexture_ST;
 
                 float4 _WaterColor;
+                float _SSSDistortion;
+                float4 _SSSColor;
+                float _SSSPower;
+                float _SSSScale;
+                float _WaveMaxHeight;
+                float _ThicknessScale;
+
                 float _TessellationFactor;
             CBUFFER_END
 
             sampler2D _DisplacementMap;     // TEXTURE2D(_DisplacementMap);    SAMPLER(sampler_DisplacementMap);
             TEXTURE2D(_NormalMap);          SAMPLER(sampler_NormalMap);
+            TEXTURE2D(_BubblesTexture);     SAMPLER(sampler_BubblesTexture);
 
             Varyings vert (Attributes input)
             {
@@ -66,7 +84,7 @@ Shader "Unlit/FFTOceanShader"
                 float4 fftPositionOS = input.positionOS + float4(displacement.xyz, 0.0);
 
                 output.positionCS = TransformObjectToHClip(fftPositionOS);
-                output.positionWS = TransformObjectToWorld(input.positionOS);
+                output.positionWS = TransformObjectToWorld(fftPositionOS);
                 return output;
             }
 
@@ -107,6 +125,15 @@ Shader "Unlit/FFTOceanShader"
                 return o;
             }
 
+            float Remap(float value, float2 inRange, float2 outRange)
+            {
+                float ratio = (value - inRange.x) / (inRange.y - inRange.x);
+                float result = ratio * (outRange.y - outRange.x) + outRange.x;
+                if(result > outRange.y) return outRange.y;
+                else if(result < outRange.x) return outRange.x;
+                else return result;
+            }
+
             float4 frag (Varyings input) : SV_Target
             {
                 // Blinn-Phong Model
@@ -116,11 +143,20 @@ Shader "Unlit/FFTOceanShader"
                 float3 viewDirWS = normalize(_WorldSpaceCameraPos.xyz - input.positionWS);
                 float3 normalWS = SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.uv).xyz;
 
+                // SSS Color
+                float3 ltLightDir = lightDirWS + normalWS * _SSSDistortion;
+                // float thickness = SAMPLE_TEXTURE2D(_BubblesTexture, sampler_BubblesTexture, input.uv).x;
+                // thickness = saturate(thickness * _ThicknessScale);
+                float waveHeight = saturate(input.positionWS.y / _WaveMaxHeight);
+                float ltDot = pow(saturate(dot(viewDirWS, -ltLightDir)), _SSSPower) * _SSSScale * waveHeight;
+                float3 sssColor = ltDot * _SSSColor.rgb;
+
                 // Ambient - half-lambert
                 float NdotL = max(dot(lightDirWS, normalWS), 0.0);
-                float halfLambert = NdotL; // * 0.5 + 0.5;
+                float halfLambert = NdotL * 0.5 + 0.5;
 
                 float3 finalColor = _WaterColor.rgb * lightColor * halfLambert;
+                finalColor += sssColor;
 
                 float3 halfwayDirWS = normalize(lightDirWS + viewDirWS);
                 float NdotH = saturate(dot(normalWS, halfwayDirWS));

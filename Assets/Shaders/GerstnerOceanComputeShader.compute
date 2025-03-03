@@ -1,0 +1,109 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel ComputeGerstnerWave
+#pragma kernel ComputeBubbles
+
+#define PI 3.14159274f
+
+int resolution;
+float oceanWidth;
+float currentTime;
+StructuredBuffer<float4> waves;
+StructuredBuffer<float3> positions;
+
+RWTexture2D<float4> displacementTexture;
+RWTexture2D<float4> normalTexture;
+RWTexture2D<float4> bubblesTexture;
+
+struct GerstnerWaveResult
+{
+    float3 position;
+    float3 binormal;
+    float3 tangent;
+};
+
+GerstnerWaveResult GetGerstnerWave(float4 wave, float2 positionXZ, GerstnerWaveResult waveResult)
+{
+    float k = 2 * PI / wave.w;
+    float w = sqrt(9.81 * k); // Phase Speed
+    float a = wave.z / k; // Amplitude
+    float2 d = normalize(wave.xy); // Direction
+    float2 p = positionXZ; // Position(xz)
+    float value = k * dot(d, p) - w * currentTime;
+    
+    // Position
+    waveResult.position.x += d.x * a * cos(value);
+    waveResult.position.z += d.y * a * cos(value);
+    waveResult.position.y += a * sin(value);
+
+    // Binormal
+    waveResult.binormal.x += -d.x * d.y * a * k * sin(value);
+    waveResult.binormal.y += d.y * a * k * cos(value);
+    waveResult.binormal.z += -d.y * d.y * a * k * sin(value);
+
+    // Tangent
+    waveResult.tangent.x += -d.x * d.x * a * k * sin(value);
+    waveResult.tangent.y += d.x * a * k * cos(value);
+    waveResult.tangent.z += -d.x * d.y * a * k * sin(value);
+    
+    return waveResult;
+}
+
+[numthreads(16,16,1)]
+void ComputeGerstnerWave(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    
+    int numWaves = waves.Length;
+    float2 positionXZ = id.xy / (float) resolution * oceanWidth - (float2)(oceanWidth / 2.0f);
+    GerstnerWaveResult waveResult;
+    waveResult.position = (float3)0.0f;
+    waveResult.binormal = (float3)0.0f;
+    waveResult.tangent = (float3)0.0f;
+
+    for (int i = 0; i < numWaves; i++)
+    {
+        waveResult = GetGerstnerWave(waves[i], positionXZ, waveResult);
+    }
+    
+    // float3 binormalOS = float3(waveResult.binormal.x, waveResult.binormal.y, 1.0 + waveResult.binormal.z);
+    // float3 tangentOS = float3(1.0 + waveResult.tangent.x, waveResult.tangent.y, waveResult.tangent.z);
+    // float3 normalOS = normalize(cross(binormalOS, tangentOS));
+
+    displacementTexture[id.xy] = float4(waveResult.position, 0.0);
+    // normalTexture[id.xy] = float4(normalOS, 0.0);
+}
+
+
+[numthreads(16,16,1)]
+void ComputeBubbles(uint3 id : SV_DispatchThreadID)
+{
+    if (!(id.x < resolution && id.y < resolution))
+        return;
+    float unitLength = oceanWidth / (resolution - 1.0f);
+
+    uint2 uvX1 = uint2((id.x - 1.0f + resolution) % resolution, id.y);
+    uint2 uvX2 = uint2((id.x + 1.0f + resolution) % resolution, id.y);
+    uint2 uvZ1 = uint2(id.x, (id.y - 1.0f + resolution) % resolution);
+    uint2 uvZ2 = uint2(id.x, (id.y + 1.0f + resolution) % resolution);
+    
+    float3 x1D = displacementTexture[uvX1].xyz;
+    float3 x2D = displacementTexture[uvX2].xyz;
+    float3 z1D = displacementTexture[uvZ1].xyz;
+    float3 z2D = displacementTexture[uvZ2].xyz;
+
+    float3 x1 = float3(x1D.x - unitLength, x1D.yz);
+    float3 x2 = float3(x2D.x + unitLength, x2D.yz);
+    float3 z1 = float3(z1D.xy, z1D.z - unitLength);
+    float3 z2 = float3(z1D.xy, z1D.z + unitLength);
+
+    float3 tangentX = x2 - x1;
+    float3 tangentZ = z2 - z1;
+    float3 normal = normalize(cross(tangentZ, tangentX));
+    normalTexture[id.xy] = float4(normal, 0.0f);
+    
+    float3 ddx = x2D - x1D;
+    float3 ddz = z2D - z1D;
+    float jacobian = (1.0f + ddx.x) * (1.0f + ddz.z) - ddx.z * ddz.x;
+    bubblesTexture[id.xy] = float4(jacobian, jacobian, jacobian, 1.0);
+}

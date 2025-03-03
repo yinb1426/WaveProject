@@ -1,9 +1,5 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using static UnityEditor.Rendering.CameraUI;
-using UnityEngine.Windows;
 
 public class FFTOcean : MonoBehaviour
 {
@@ -18,8 +14,14 @@ public class FFTOcean : MonoBehaviour
     public float _TimeScale = 1f;
     public float _OceanWidth = 100f;
     public Vector4 _WindAndSeed = new Vector4(0.1f, 0.2f, 0f, 0f);
+    public float _BubblesScale;
+    [Range(0f, 1f)]
+    public float _BubblesThreshold;
 
     public Material _OceanMaterial;
+    public Material _BlurMaterial;
+    public Material _TestMaterial;
+    public Material _TestMaterial2;
 
     // Kernels
     private int kernelComputeGaussianRandom;
@@ -30,7 +32,7 @@ public class FFTOcean : MonoBehaviour
     private int kernelFFTVertical;
     private int kernelFFTVerticalEnd;
     private int kernelCalculateDisplacement;
-    private int kernelCalculateNormal;
+    private int kernelCalculateNormalAndBubbles;
 
     // Textures
     private RenderTexture gaussianRandomTexture;
@@ -40,6 +42,8 @@ public class FFTOcean : MonoBehaviour
     private RenderTexture outputSpectrumTexture;
     private RenderTexture displacementTexture;
     private RenderTexture normalTexture;
+    private RenderTexture bubblesTexture;
+    private RenderTexture bubblesBlurTexture;
 
     private int groupX;
     private int groupY;
@@ -65,6 +69,8 @@ public class FFTOcean : MonoBehaviour
         outputSpectrumTexture = CreateRenderTexture(textureResolution);
         displacementTexture = CreateRenderTexture(textureResolution);
         normalTexture = CreateRenderTexture(textureResolution);
+        bubblesTexture = CreateRenderTexture(textureResolution);
+        bubblesBlurTexture = CreateRenderTexture(textureResolution);
 
         // Find kernels
         kernelComputeGaussianRandom = _FFTOceanComputeShader.FindKernel("ComputeGaussianRandom");
@@ -75,7 +81,7 @@ public class FFTOcean : MonoBehaviour
         kernelFFTVertical = _FFTOceanComputeShader.FindKernel("FFTVertical");
         kernelFFTVerticalEnd = _FFTOceanComputeShader.FindKernel("FFTVerticalEnd");
         kernelCalculateDisplacement = _FFTOceanComputeShader.FindKernel("CalculateDisplacement");
-        kernelCalculateNormal = _FFTOceanComputeShader.FindKernel("CalculateNormal");
+        kernelCalculateNormalAndBubbles = _FFTOceanComputeShader.FindKernel("CalculateNormalAndBubbles");
 
         // Set shader params
         _FFTOceanComputeShader.SetInt("resolution", textureResolution); // Must be set in Start function
@@ -105,6 +111,8 @@ public class FFTOcean : MonoBehaviour
         _FFTOceanComputeShader.SetFloat("lambda", _Lambda);
         _FFTOceanComputeShader.SetFloat("heightScale", _HeightScale);
         _FFTOceanComputeShader.SetFloat("oceanWidth", _OceanWidth);
+        _FFTOceanComputeShader.SetFloat("bubblesScale", _BubblesScale);
+        _FFTOceanComputeShader.SetFloat("bubblesThreshold", _BubblesThreshold);
 
         // Generate Height Spectrum
         _FFTOceanComputeShader.SetTexture(kernelCreateHeightSpectrum, "gaussianRandomTexture", gaussianRandomTexture);
@@ -164,13 +172,18 @@ public class FFTOcean : MonoBehaviour
         _FFTOceanComputeShader.Dispatch(kernelCalculateDisplacement, groupX, groupY, 1);
 
         // Calculate Normal
-        _FFTOceanComputeShader.SetTexture(kernelCalculateNormal, "displacementTexture", displacementTexture);
-        _FFTOceanComputeShader.SetTexture(kernelCalculateNormal, "normalTexture", normalTexture);
-        _FFTOceanComputeShader.Dispatch(kernelCalculateNormal, groupX, groupY, 1);
+        _FFTOceanComputeShader.SetTexture(kernelCalculateNormalAndBubbles, "displacementTexture", displacementTexture);
+        _FFTOceanComputeShader.SetTexture(kernelCalculateNormalAndBubbles, "normalTexture", normalTexture);
+        _FFTOceanComputeShader.SetTexture(kernelCalculateNormalAndBubbles, "bubblesTexture", bubblesTexture);
+
+        _FFTOceanComputeShader.Dispatch(kernelCalculateNormalAndBubbles, groupX, groupY, 1);
+
+        Graphics.Blit(bubblesTexture, bubblesBlurTexture, _BlurMaterial);
 
         // Set Material Texture                                                                    
         _OceanMaterial.SetTexture("_DisplacementMap", displacementTexture);
         _OceanMaterial.SetTexture("_NormalMap", normalTexture);
+        _OceanMaterial.SetTexture("_BubblesTexture", bubblesBlurTexture);
     }
 
     void OnDestroy()
@@ -210,6 +223,14 @@ public class FFTOcean : MonoBehaviour
         normalTexture.Release();
         Destroy(normalTexture);
         normalTexture = null;
+
+        bubblesTexture.Release();
+        Destroy(bubblesTexture);
+        bubblesTexture = null;
+
+        bubblesBlurTexture.Release();
+        Destroy(bubblesBlurTexture);
+        bubblesBlurTexture = null;
     }
 
     private void ComputeFFT(int kernel, ref RenderTexture inputSpectrumTexture)

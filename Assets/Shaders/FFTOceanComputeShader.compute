@@ -6,7 +6,7 @@
 #pragma kernel FFTVertical
 #pragma kernel FFTVerticalEnd
 #pragma kernel CalculateDisplacement
-#pragma kernel CalculateNormal
+#pragma kernel CalculateNormalAndBubbles
 
 #define PI 3.14159274f
 #define gravity 9.81f
@@ -19,6 +19,8 @@ int ns;
 float lambda;
 float heightScale;
 float oceanWidth;
+float bubblesScale;	   
+float bubblesThreshold;
 
 uint randNum;
 
@@ -31,6 +33,7 @@ RWTexture2D<float4> inputSpectrumTexture;
 RWTexture2D<float4> outputSpectrumTexture;
 RWTexture2D<float4> displacementTexture;
 RWTexture2D<float4> normalTexture;
+RWTexture2D<float4> bubblesTexture;
 
 // Functions
 float2 Gaussian(float2 id);
@@ -177,9 +180,8 @@ void CalculateDisplacement(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(16,16,1)]
-void CalculateNormal(uint3 id : SV_DispatchThreadID)
+void CalculateNormalAndBubbles(uint3 id : SV_DispatchThreadID)
 {
-    // 法线计算优化
     if (!(id.x < resolution && id.y < resolution))
         return;
     //计算法线
@@ -209,6 +211,15 @@ void CalculateNormal(uint3 id : SV_DispatchThreadID)
     //计算法线
     float3 normal = normalize(cross(tangentZ, tangentX));
     normalTexture[id.xy] = float4(normal, 0.0f);
+
+    //计算泡沫
+    float3 ddx = x2D - x1D;
+    float3 ddz = z2D - z1D;
+
+    //雅可比行列式
+    float jacobian = (1.0f + ddx.x) * (1.0f + ddz.z) - ddx.z * ddz.x;
+    // jacobian = saturate(max(0, bubblesThreshold - saturate(jacobian)) * bubblesScale);
+    bubblesTexture[id.xy] = float4(jacobian, jacobian, jacobian, 1.0);
 }
 
 // Utils
