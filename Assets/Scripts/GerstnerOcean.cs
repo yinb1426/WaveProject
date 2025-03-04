@@ -14,7 +14,6 @@ public class GerstnerOcean : MonoBehaviour
     public float _TimeScale = 1.5f;
 
     public ComputeShader _GerstnerComputeShader;
-    public Material _GerstnerMaterial;
 
     private RenderTexture displacementTexture;
     private RenderTexture normalTexture;
@@ -24,7 +23,7 @@ public class GerstnerOcean : MonoBehaviour
     private int groupY;
     private int textureResolution;
     private float currentTime = 0;
-
+    private Material gerstnerMaterial;
     private int kernelComputeGerstnerWave;
     private int kernelComputeBubbles;
     private ComputeBuffer gerstnerWavesBuffer;
@@ -36,10 +35,13 @@ public class GerstnerOcean : MonoBehaviour
         groupX = Mathf.CeilToInt(textureResolution / 16f);
         groupY = Mathf.CeilToInt(textureResolution / 16f);
 
+
         if (displacementTexture != null && displacementTexture.IsCreated())
         {
             DestroyAllTextures();
         }
+
+        gerstnerMaterial = GetComponent<MeshRenderer>().material;
 
         displacementTexture = CreateRenderTexture(textureResolution);
         normalTexture = CreateRenderTexture(textureResolution);
@@ -64,18 +66,17 @@ public class GerstnerOcean : MonoBehaviour
         _GerstnerComputeShader.SetFloat("currentTime", currentTime);
         _GerstnerComputeShader.SetBuffer(kernelComputeGerstnerWave, "waves", gerstnerWavesBuffer);
         _GerstnerComputeShader.SetTexture(kernelComputeGerstnerWave, "displacementTexture", displacementTexture);
-        //_GerstnerComputeShader.SetTexture(kernelComputeGerstnerWave, "normalTexture", normalTexture);
+        _GerstnerComputeShader.SetTexture(kernelComputeGerstnerWave, "normalTexture", normalTexture);
         _GerstnerComputeShader.Dispatch(kernelComputeGerstnerWave, groupX, groupY, 1);
 
         // Compute Bubbles
         _GerstnerComputeShader.SetTexture(kernelComputeBubbles, "displacementTexture", displacementTexture);
-        _GerstnerComputeShader.SetTexture(kernelComputeBubbles, "normalTexture", normalTexture);
         _GerstnerComputeShader.SetTexture(kernelComputeBubbles, "bubblesTexture", bubblesTexture);
         _GerstnerComputeShader.Dispatch(kernelComputeBubbles, groupX, groupY, 1);
 
-        _GerstnerMaterial.SetTexture("_DisplacementMap", displacementTexture);
-        _GerstnerMaterial.SetTexture("_NormalMap", normalTexture);
-        _GerstnerMaterial.SetTexture("_BubblesTexture", bubblesTexture);
+        gerstnerMaterial.SetTexture("_DisplacementMap", displacementTexture);
+        gerstnerMaterial.SetTexture("_NormalMap", normalTexture);
+        gerstnerMaterial.SetTexture("_BubblesTexture", bubblesTexture);
     }
 
     private RenderTexture CreateRenderTexture(int resolution)

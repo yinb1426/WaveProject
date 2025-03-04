@@ -3,9 +3,19 @@ Shader "Unlit/GerstnerWaveShader"
     Properties
     {
         [Header(Waves)]
-        _WaveA ("WaveA (Direction(dx, dy), Steepness, WaveLength)", Vector) = (1.0, 1.0, 0.7, 10.0)
-        _WaveB ("WaveB", Vector) = (1.0, 1.0, 0.7, 10.0)
-        _WaveC ("WaveC", Vector) = (1.0, 1.0, 0.7, 10.0)
+        _WaveA ("WaveA (Direction(dx, dy), Steepness, WaveLength)", Vector) = (-1.0, 0.0, 0.35, 1.43)
+        _WaveB ("WaveB", Vector) = (-0.3, 0.2, 0.5, 0.21)
+        _WaveC ("WaveC", Vector) = (0.2, -1.0, 0.1, 2.5)
+        _WaveD ("WaveD", Vector) = (-0.5, -0.1, 0.18, 0.03)
+        _WaveE ("WaveE", Vector) = (-2.03, -15, 0.15, 1.5)
+        _WaveF ("WaveF", Vector) = (1, -7, 0.25, 0.1)
+        _WaveG ("WaveG", Vector) = (-0.2, -0.4, 0.2, 0.2)
+        _WaveH ("WaveH", Vector) = (-2, 5, 0.4, 0.4)
+        _WaveI ("WaveI", Vector) = (3, -5, 0.2, 0.6)
+        _WaveJ ("WaveJ", Vector) = (0.2, 0.4, 0.3, 0.4)
+        _WaveK ("WaveK", Vector) = (2, 3, 0.4, 4)
+        _WaveL ("WaveL", Vector) = (0.4, -0.6, 0.1, 7)
+
 
         [Header(Water)]
         _WaterColor ("Water Color", Color) = (1, 1, 1, 1)
@@ -53,6 +63,15 @@ Shader "Unlit/GerstnerWaveShader"
                 float4 _WaveA;
                 float4 _WaveB;
                 float4 _WaveC;
+                float4 _WaveD;
+                float4 _WaveE;
+                float4 _WaveF;
+                float4 _WaveG;
+                float4 _WaveH;
+                float4 _WaveI;
+                float4 _WaveJ;
+                float4 _WaveK;
+                float4 _WaveL;
                 float4 _WaterColor;
                 float _TessellationFactor;
             CBUFFER_END
@@ -95,6 +114,15 @@ Shader "Unlit/GerstnerWaveShader"
                 GetGerstnerWave(_WaveA, input.positionOS.xz, positionOS, binormalOS, tangentOS);
                 GetGerstnerWave(_WaveB, input.positionOS.xz, positionOS, binormalOS, tangentOS);
                 GetGerstnerWave(_WaveC, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveD, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveE, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveF, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveG, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveH, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveI, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveJ, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveK, input.positionOS.xz, positionOS, binormalOS, tangentOS);
+                GetGerstnerWave(_WaveL, input.positionOS.xz, positionOS, binormalOS, tangentOS);
 
                 // Position
                 input.positionOS.x += positionOS.x;
